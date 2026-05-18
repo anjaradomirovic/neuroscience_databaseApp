@@ -1,9 +1,13 @@
 package org.baze.neuronauka.dao;
 
 import org.baze.neuronauka.db.DBConnection;
+import org.baze.neuronauka.model.HitanResursDTO;
 import org.baze.neuronauka.model.SesijaDTO;
+import org.baze.neuronauka.model.SesijaResursDTO;
 
 import java.sql.*;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -203,6 +207,139 @@ public class SesijaDAO {
             ps.executeUpdate();
             // ako trigger puca, executeUpdate() baca SQLException
             // — ne hvatamo je ovde, propagiramo je ka controlleru
+        }
+    }
+
+    // Učitava resurse dostupne za izvodjenje (iz Izvodjenje_Resurs)
+    public List<SesijaResursDTO> getResuriZaIzvodjenje(int idIzvodjenje) {
+        List<SesijaResursDTO> lista = new ArrayList<>();
+        String sql =
+                "SELECT r.id_resurs, r.naziv, ir.kolicina " +
+                        "FROM Izvodjenje_Resurs ir " +
+                        "JOIN Resurs r ON r.id_resurs = ir.id_resurs " +
+                        "WHERE ir.id_izvodjenje = ? " +
+                        "ORDER BY r.naziv";
+        try (Connection con = DBConnection.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setInt(1, idIzvodjenje);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    lista.add(new SesijaResursDTO(
+                            rs.getInt("id_resurs"),
+                            rs.getString("naziv"),
+                            rs.getDouble("kolicina")));
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return lista;
+    }
+    public void zabeležiUtrosak(int idSesija, int idResurs, double kolicina) throws SQLException {
+        String sql = "INSERT INTO Utrosak_resursa (id_sesija, id_resurs, kolicina) VALUES (?, ?, ?)";
+        try (Connection con = DBConnection.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setInt(1, idSesija);
+            ps.setInt(2, idResurs);
+            ps.setDouble(3, kolicina);
+            ps.executeUpdate();
+        }
+    }
+    public int insertSesijaVratiId(LocalDate datum, LocalTime pocetak,
+                                   LocalTime kraj, String tip,
+                                   int idIzvodjenje) throws SQLException {
+        String sql = """
+            INSERT INTO Sesija (datum_sesije, vreme_pocetka, vreme_kraja, tip_sesije, id_izvodjenje)
+            VALUES (?, ?, ?, ?, ?)
+            """;
+        try (Connection con = DBConnection.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            ps.setDate(1, java.sql.Date.valueOf(datum));
+            ps.setTime(2, java.sql.Time.valueOf(pocetak));
+            ps.setTime(3, java.sql.Time.valueOf(kraj));
+            ps.setString(4, tip);
+            ps.setInt(5, idIzvodjenje);
+            ps.executeUpdate();
+            try (ResultSet rs = ps.getGeneratedKeys()) {
+                if (rs.next()) return rs.getInt(1);
+            }
+        }
+        throw new SQLException("Nije vraćen ID nove sesije.");
+    }
+
+
+
+
+    public void pokreniZabeležiUtrosak(int idSesija) throws SQLException {
+        try (Connection con = DBConnection.getConnection();
+             CallableStatement cs = con.prepareCall("{CALL sp_zabeleži_utrosak(?)}")) {
+            cs.setInt(1, idSesija);
+            cs.execute();
+        }
+    }
+    public List<HitanResursDTO> pokrenniZabeležiUtrosak(int idSesija) throws SQLException {
+        List<HitanResursDTO> lista = new ArrayList<>();
+        try (Connection con = DBConnection.getConnection();
+             CallableStatement cs = con.prepareCall("{CALL sp_zabeleži_utrosak(?)}")) {
+            cs.setInt(1, idSesija);
+            try (ResultSet rs = cs.executeQuery()) {
+                while (rs.next()) {
+                    lista.add(new HitanResursDTO(
+                            rs.getInt("id_resurs"),
+                            rs.getString("naziv_resursa"),
+                            rs.getBigDecimal("kolicina_fali")));
+                }
+            }
+        }
+        return lista;
+    }
+
+
+    public List<HitanResursDTO> proveriResurse(int idIzvodjenje) throws SQLException {
+        List<HitanResursDTO> lista = new ArrayList<>();
+        try (Connection con = DBConnection.getConnection();
+             CallableStatement cs = con.prepareCall("{CALL sp_proveri_resurse(?)}")) {
+            cs.setInt(1, idIzvodjenje);
+            try (ResultSet rs = cs.executeQuery()) {
+                while (rs.next()) {
+                    lista.add(new HitanResursDTO(
+                            rs.getInt("id_resurs"),
+                            rs.getString("naziv_resursa"),
+                            rs.getBigDecimal("kolicina_fali")));
+                }
+            }
+        }
+        return lista;
+    }
+    public List<HitanResursDTO> proveriResurseIzvodjenja(int idIzvodjenje) throws SQLException {
+        List<HitanResursDTO> lista = new ArrayList<>();
+        try (Connection con = DBConnection.getConnection();
+             CallableStatement cs = con.prepareCall("{CALL sp_proveri_resurse(?)}")) {
+            cs.setInt(1, idIzvodjenje);
+            try (ResultSet rs = cs.executeQuery()) {
+                while (rs.next()) {
+                    lista.add(new HitanResursDTO(
+                            rs.getInt("id_resurs"),
+                            rs.getString("naziv_resursa"),
+                            rs.getBigDecimal("kolicina_fali")));
+                }
+            }
+        }
+        return lista;
+    }
+    public void azurirajStatusAkoJePrvaSesija(int idIzvodjenje) throws SQLException {
+        String sql = """
+            UPDATE Izvodjenje
+            SET status = 'zapoceto'
+            WHERE id_izvodjenje = ?
+              AND status = 'planirano'
+              AND (SELECT COUNT(*) FROM Sesija WHERE id_izvodjenje = ?) = 1
+            """;
+        try (Connection con = DBConnection.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setInt(1, idIzvodjenje);
+            ps.setInt(2, idIzvodjenje);
+            ps.executeUpdate();
         }
     }
 }

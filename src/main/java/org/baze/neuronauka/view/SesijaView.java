@@ -2,77 +2,121 @@ package org.baze.neuronauka.view;
 
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
 
-import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.TextStyle;
 import java.util.Locale;
 
 public class SesijaView {
 
-    // navigacija
+    // ── navigacija ─────────────────────────────────────────────────
     private Button prevMonthBtn  = new Button("‹");
     private Button nextMonthBtn  = new Button("›");
     private Label  monthLabel    = new Label();
     private Spinner<Integer> yearSpinner = new Spinner<>(2000, 2100, YearMonth.now().getYear());
 
-    // filteri
+    // ── filteri u sidebaru ─────────────────────────────────────────
     private ComboBox<String> labFilter = new ComboBox<>();
     private ComboBox<String> expFilter = new ComboBox<>();
 
-    //kalendarska mreža
+    // ── kalendarska mreža ──────────────────────────────────────────
     private GridPane calendarGrid = new GridPane();
 
-    // lista sesija u sidebaru
+    // ── lista sesija u sidebaru ────────────────────────────────────
     private ListView<String> sesijaListView = new ListView<>();
 
-    //header info
+    // ── header info ────────────────────────────────────────────────
     private Label userLabel = new Label();
 
-    // trenutni mesec/godina (controller može da čita/menja)
+    // ── trenutni mesec/godina ──────────────────────────────────────
     private YearMonth currentYearMonth;
-    private Button editLabBtn = new Button();
 
-    //
+    // ── root layout — čuva se da bi switchCenter radio ─────────────
+    private BorderPane root = new BorderPane();
+
+    // ── HEADER TOOLBAR — tri MenuButton-a ─────────────────────────
+
+    // Sesija menu
+    private MenuItem pregledSesijaItem = new MenuItem("Pregled sesija");
+    private MenuItem novaSesijaItem    = new MenuItem("Nova sesija");
+    private MenuButton sesijaMenuBtn   = new MenuButton("Sesija", null,
+            pregledSesijaItem, novaSesijaItem);
+
+    // Laboratorija menu
+    private MenuItem editLabItem    = new MenuItem("Edit");
+    private MenuItem resursiLabItem = new MenuItem("Resursi");
+    private MenuItem alatLabItem    = new MenuItem("Alat");
+    private MenuButton labMenuBtn   = new MenuButton("Laboratorija", null,
+            editLabItem, resursiLabItem, alatLabItem);
+
+    // Eksperiment menu — dodaj izvodjenjeExpItem
+    private MenuItem editExpItem        = new MenuItem("Edit");
+    private MenuItem statsExpItem       = new MenuItem("Statistika");
+    private MenuItem izvodjenjeExpItem  = new MenuItem("Izvodjenje"); // NOVO
+    private MenuButton expMenuBtn = new MenuButton("Eksperiment", null,
+            editExpItem, statsExpItem, izvodjenjeExpItem);
+
+    // ── aktivni prikaz (za highlight u headeru) ────────────────────
+    private enum ActiveView { SESIJE, RESURSI, LABORATORIJA, EKSPERIMENT, OTHER }
+    private ActiveView activeView = ActiveView.SESIJE;
+
+    // ──────────────────────────────────────────────────────────────
+
     public void show(Stage stage, String loggedInUser) {
         userLabel.setText("Korisnik: " + loggedInUser);
-
-        // Podesi početni mesec na trenutni
         currentYearMonth = YearMonth.now();
 
-        BorderPane root = new BorderPane();
         root.setTop(buildTopBar());
-        root.setCenter(buildCenter());
+        root.setCenter(buildSesijaCenter());
         root.setStyle("-fx-background-color: #f5f5f5;");
 
         Scene scene = new Scene(root, 1100, 700);
         stage.setScene(scene);
-        stage.setTitle("Pregled sesija");
+        stage.setTitle("Neuronauka");
         stage.show();
 
         refreshMonthLabel();
     }
 
-    // TOP BAR
+    // ── ZAMENA CENTRALNOG SADRŽAJA ─────────────────────────────────
 
-    private HBox buildTopBar() {
-        Label title = new Label("Pregled sesija");
-        title.setFont(Font.font("System", FontWeight.BOLD, 16));
+    /**
+     * Menja centralni sadržaj prozora (header ostaje isti).
+     * Controller poziva ovu metodu umesto otvaranja novog Stage-a.
+     */
+    public void switchCenter(Node node) {
+        root.setCenter(node);
+    }
+
+    /**
+     * Vraća prikaz sesija (kalendar + sidebar).
+     * Controller poziva ovo kad korisnik klikne "Sesija → Pregled sesija".
+     */
+    public Node buildSesijaCenter() {
+        return buildCenter();
+    }
+
+    // ── TOP BAR ────────────────────────────────────────────────────
+
+    public HBox buildTopBar() {
+        styleMenuBtn(sesijaMenuBtn, activeView == ActiveView.SESIJE);
+        styleMenuBtn(labMenuBtn,    activeView == ActiveView.LABORATORIJA || activeView == ActiveView.RESURSI);
+        styleMenuBtn(expMenuBtn,    activeView == ActiveView.EKSPERIMENT);
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
         userLabel.setStyle("-fx-text-fill: #555555; -fx-font-size: 13px;");
 
-        HBox topBar = new HBox(12, title, spacer, userLabel);
-        topBar.setPadding(new Insets(12, 20, 12, 20));
+        HBox topBar = new HBox(10, sesijaMenuBtn, labMenuBtn, expMenuBtn, spacer, userLabel);
+        topBar.setPadding(new Insets(10, 20, 10, 20));
         topBar.setAlignment(Pos.CENTER_LEFT);
         topBar.setStyle(
                 "-fx-background-color: white;" +
@@ -82,30 +126,42 @@ public class SesijaView {
         return topBar;
     }
 
-
-    // CENTAR = kalendar (levo) + sidebar (desno)
-
-    private HBox buildCenter() {
-
-        VBox calendarPane = buildCalendarPane();
-        VBox sidebar = buildSidebar();
-
-        HBox.setHgrow(calendarPane, Priority.ALWAYS);
-
-        HBox center = new HBox(0, calendarPane, sidebar);
-
-        return center;
+    /**
+     * Osvežava izgled header dugmadi (aktivan vs neaktivan).
+     * Poziva se nakon svakog switchCenter-a.
+     */
+    public void setActiveView(String viewName) {
+        switch (viewName) {
+            case "sesije"      -> activeView = ActiveView.SESIJE;
+            case "resursi"     -> activeView = ActiveView.RESURSI;
+            case "laboratorija"-> activeView = ActiveView.LABORATORIJA;
+            case "eksperiment" -> activeView = ActiveView.EKSPERIMENT;
+            default            -> activeView = ActiveView.OTHER;
+        }
+        root.setTop(buildTopBar());
     }
 
+    // ── CENTAR = kalendar (levo) + sidebar (desno) ─────────────────
 
-    // LEVO — navigacija + kalendar
+    private HBox buildCenter() {
+        VBox calendarPane = buildCalendarPane();
+        VBox sidebar      = buildSidebar();
+        HBox.setHgrow(calendarPane, Priority.ALWAYS);
+        return new HBox(0, calendarPane, sidebar);
+    }
+
+    // ── LEVO — naslov + navigacija + kalendar ──────────────────────
 
     private VBox buildCalendarPane() {
         VBox pane = new VBox(12);
         pane.setPadding(new Insets(16, 16, 16, 20));
         HBox.setHgrow(pane, Priority.ALWAYS);
 
-        pane.getChildren().addAll(buildNavRow(), buildDayHeaders(), calendarGrid);
+        Label title = new Label("Pregled sesija");
+        title.setFont(Font.font("System", FontWeight.BOLD, 16));
+        title.setStyle("-fx-text-fill: #333333;");
+
+        pane.getChildren().addAll(title, buildNavRow(), buildDayHeaders(), calendarGrid);
 
         calendarGrid.setHgap(4);
         calendarGrid.setVgap(4);
@@ -113,8 +169,6 @@ public class SesijaView {
 
         return pane;
     }
-
-    // navigacijski red: ‹  Maj 2026  ›  [godina spinner]
 
     private HBox buildNavRow() {
         styleNavBtn(prevMonthBtn);
@@ -132,7 +186,6 @@ public class SesijaView {
         return nav;
     }
 
-    // zaglavlje dana: Pon Uto Sri Čet Pet Sub Ned
     private HBox buildDayHeaders() {
         String[] dani = {"Pon", "Uto", "Sri", "Čet", "Pet", "Sub", "Ned"};
         HBox row = new HBox();
@@ -151,8 +204,7 @@ public class SesijaView {
         return row;
     }
 
-
-    // DESNO — filteri + lista sesija
+    // ── DESNO — filteri + lista sesija ─────────────────────────────
 
     private VBox buildSidebar() {
         VBox sidebar = new VBox(10);
@@ -165,46 +217,11 @@ public class SesijaView {
                         "-fx-border-width: 0 0 0 1;"
         );
 
-        // ── Laboratorija red: [dropdown] [editLab dugme] ───────────
         Label labLbl = makeFilterLabel("Laboratorija");
         labFilter.setPromptText("— sve laboratorije —");
         labFilter.setMaxWidth(Double.MAX_VALUE);
         labFilter.setStyle("-fx-font-size: 12px;");
 
-        // kockasto dugme sa ikonom editLab.png
-        try {
-            javafx.scene.image.Image img = new javafx.scene.image.Image(
-                    java.util.Objects.requireNonNull(
-                            getClass().getResourceAsStream("/editLab.png")
-                    )
-            );
-            javafx.scene.image.ImageView iv = new javafx.scene.image.ImageView(img);
-            iv.setFitWidth(14);
-            iv.setFitHeight(14);
-            iv.setPreserveRatio(true);
-            editLabBtn.setGraphic(iv);
-        } catch (Exception ignored) {
-            // ikona nije pronađena — dugme ostaje prazno, ne ruši se aplikacija
-        }
-
-        editLabBtn.setStyle(
-                "-fx-background-color: transparent;" +
-                        "-fx-border-color: #d0d0d0;" +
-                        "-fx-border-radius: 5;" +
-                        "-fx-background-radius: 5;" +
-                        "-fx-cursor: hand;" +
-                        "-fx-padding: 4 6 4 6;" +
-                        "-fx-min-width: 28px;" +
-                        "-fx-min-height: 28px;"
-        );
-        editLabBtn.setTooltip(new javafx.scene.control.Tooltip("Upravljanje laboratorijama"));
-
-        // dropdown se širi, dugme ima fiksnu širinu
-        HBox labRow = new HBox(6, labFilter, editLabBtn);
-        labRow.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
-        HBox.setHgrow(labFilter, Priority.ALWAYS);
-
-        // ── Eksperiment dropdown ────────────────────────────────────
         Label expLbl = makeFilterLabel("Eksperiment");
         expFilter.setPromptText("— svi eksperimenti —");
         expFilter.setMaxWidth(Double.MAX_VALUE);
@@ -218,7 +235,7 @@ public class SesijaView {
         VBox.setVgrow(sesijaListView, Priority.ALWAYS);
 
         sidebar.getChildren().addAll(
-                labLbl, labRow,        // ← labRow sadrži dropdown + dugme
+                labLbl, labFilter,
                 expLbl, expFilter,
                 sep,
                 listLbl, sesijaListView
@@ -226,30 +243,18 @@ public class SesijaView {
         return sidebar;
     }
 
-    // METODE koje controller poziva da osvežava UI
+    // ── METODE koje controller poziva ──────────────────────────────
 
-
-    /**
-     * Briše sve ćelije kalendara i priprema grid za novo punjenje.
-     * Controller poziva ovo pre nego što doda ćelije.
-     */
     public void clearCalendarGrid() {
         calendarGrid.getChildren().clear();
     }
 
-    /**
-     * Dodaje jednu ćeliju u grid na poziciju (col, row).
-     * Ćelije kreira controller — ovde su samo pomoćne metode za pravljenje.
-     */
     public void addCellToGrid(VBox cell, int col, int row) {
         calendarGrid.add(cell, col, row);
         GridPane.setHgrow(cell, Priority.ALWAYS);
         GridPane.setVgrow(cell, Priority.ALWAYS);
     }
 
-    /**
-     * Pravi praznu ćeliju (dani pre prvog u mesecu).
-     */
     public VBox makeEmptyCell() {
         VBox cell = new VBox();
         cell.setMinSize(80, 90);
@@ -257,10 +262,6 @@ public class SesijaView {
         return cell;
     }
 
-    /**
-     * Pravi ćeliju za jedan dan sa brojem dana.
-     * Controller dodaje sesija-čipove unutra.
-     */
     public VBox makeDayCell(int dayNum, boolean isToday) {
         VBox cell = new VBox(3);
         cell.setMinSize(80, 90);
@@ -283,10 +284,6 @@ public class SesijaView {
         return cell;
     }
 
-    /**
-     * Pravi čip za jednu sesiju unutar ćelije.
-     * tip određuje boju: baseline | stimulus | recovery | wash_out
-     */
     public VBox makeSesijaChip(int idSesija, String pocetakVremena, int trajMin,
                                String eksperimentNaziv, String tip) {
         VBox chip = new VBox(1);
@@ -319,32 +316,67 @@ public class SesijaView {
         return chip;
     }
 
-    /** Osvežava labelu meseca i godine. */
     public void refreshMonthLabel() {
         String mesec = currentYearMonth.getMonth()
                 .getDisplayName(TextStyle.FULL_STANDALONE, new Locale("sr"));
-        monthLabel.setText(mesec.substring(0,1).toUpperCase() + mesec.substring(1));
+        monthLabel.setText(mesec.substring(0, 1).toUpperCase() + mesec.substring(1));
         yearSpinner.getValueFactory().setValue(currentYearMonth.getYear());
     }
 
+    // ── GETTERI ────────────────────────────────────────────────────
 
-    // GETTERI — controller veže akcije i čita podatke
-
-    public Button getPrevMonthBtn()              { return prevMonthBtn; }
-    public Button getNextMonthBtn()              { return nextMonthBtn; }
-    public Spinner<Integer> getYearSpinner()     { return yearSpinner; }
-    public ComboBox<String> getLabFilter()       { return labFilter; }
-    public ComboBox<String> getExpFilter()       { return expFilter; }
-    public ListView<String> getSesijaListView()  { return sesijaListView; }
-    public Label getUserLabel()                  { return userLabel; }
-    public YearMonth getCurrentYearMonth()       { return currentYearMonth; }
-    public Button getEditLabBtn()                { return editLabBtn; }
+    public Button getPrevMonthBtn()             { return prevMonthBtn; }
+    public Button getNextMonthBtn()             { return nextMonthBtn; }
+    public Spinner<Integer> getYearSpinner()    { return yearSpinner; }
+    public ComboBox<String> getLabFilter()      { return labFilter; }
+    public ComboBox<String> getExpFilter()      { return expFilter; }
+    public ListView<String> getSesijaListView() { return sesijaListView; }
+    public Label getUserLabel()                 { return userLabel; }
+    public YearMonth getCurrentYearMonth()      { return currentYearMonth; }
     public void setCurrentYearMonth(YearMonth ym) {
         this.currentYearMonth = ym;
         refreshMonthLabel();
     }
 
-    //PRIVATNE POMOĆNE METODE
+    // Sesija menu items
+    public MenuItem getPregledSesijaItem() { return pregledSesijaItem; }
+    public MenuItem getNovaSesijaItem()    { return novaSesijaItem; }
+
+    // Laboratorija menu items
+    public MenuItem getEditLabItem()    { return editLabItem; }
+    public MenuItem getResuriLabItem()  { return resursiLabItem; }
+    public MenuItem getAlatLabItem()    { return alatLabItem; }
+
+    // Eksperiment menu items
+    public MenuItem getEditExpItem()   { return editExpItem; }
+    public MenuItem getStatsExpItem()  { return statsExpItem; }
+    public MenuItem getIzvodjenjeExpItem()  { return izvodjenjeExpItem; }
+
+    // MenuButton getteri (za ResursiController koji ih reattach-uje)
+    public MenuButton getSesijaMenuBtn() { return sesijaMenuBtn; }
+    public MenuButton getLabMenuBtn()    { return labMenuBtn; }
+    public MenuButton getExpMenuBtn()    { return expMenuBtn; }
+
+    // ── PRIVATNE POMOĆNE METODE ────────────────────────────────────
+
+    private void styleMenuBtn(MenuButton btn, boolean active) {
+        String base =
+                "-fx-font-size: 13px;" +
+                        "-fx-font-weight: bold;" +
+                        "-fx-background-color: " + (active ? "#EEEDFE" : "white") + ";" +
+                        "-fx-text-fill: " + (active ? "#534AB7" : "#333333") + ";" +
+                        "-fx-border-color: " + (active ? "#534AB7" : "#d0d0d0") + ";" +
+                        "-fx-border-radius: 6;" +
+                        "-fx-background-radius: 6;" +
+                        "-fx-cursor: hand;" +
+                        "-fx-padding: 5 12 5 12;";
+        btn.setStyle(base);
+        btn.setOnMouseEntered(e -> btn.setStyle(base
+                .replace("-fx-background-color: " + (active ? "#EEEDFE" : "white") + ";",
+                        "-fx-background-color: " + (active ? "#DDDCFD" : "#f0f0f0") + ";")));
+        btn.setOnMouseExited(e -> btn.setStyle(base));
+    }
+
     private void styleNavBtn(Button btn) {
         btn.setStyle(
                 "-fx-font-size: 18px;" +
@@ -358,7 +390,7 @@ public class SesijaView {
         );
         btn.setOnMouseEntered(e -> btn.setStyle(btn.getStyle() +
                 "-fx-background-color: #f0f0f0;"));
-        btn.setOnMouseExited(e  -> btn.setStyle(btn.getStyle()
+        btn.setOnMouseExited(e -> btn.setStyle(btn.getStyle()
                 .replace("-fx-background-color: #f0f0f0;", "-fx-background-color: transparent;")));
     }
 
@@ -375,11 +407,11 @@ public class SesijaView {
 
     private String chipColors(String tip) {
         return switch (tip == null ? "" : tip) {
-            case "baseline"  -> "-fx-background-color: #E1F5EE; -fx-border-color: #0F6E56;";
-            case "stimulus"  -> "-fx-background-color: #FAEEDA; -fx-border-color: #854F0B;";
-            case "recovery"  -> "-fx-background-color: #FAECE7; -fx-border-color: #993C1D;";
-            case "wash_out"  -> "-fx-background-color: #E6F1FB; -fx-border-color: #185FA5;";
-            default          -> "-fx-background-color: #EEEDFE; -fx-border-color: #534AB7;";
+            case "baseline" -> "-fx-background-color: #E1F5EE; -fx-border-color: #0F6E56;";
+            case "stimulus" -> "-fx-background-color: #FAEEDA; -fx-border-color: #854F0B;";
+            case "recovery" -> "-fx-background-color: #FAECE7; -fx-border-color: #993C1D;";
+            case "wash_out" -> "-fx-background-color: #E6F1FB; -fx-border-color: #185FA5;";
+            default         -> "-fx-background-color: #EEEDFE; -fx-border-color: #534AB7;";
         };
     }
 

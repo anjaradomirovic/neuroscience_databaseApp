@@ -1,12 +1,19 @@
 package org.baze.neuronauka.controller;
 
-import javafx.scene.layout.VBox;
+import javafx.scene.Node;
 import javafx.stage.Stage;
+import org.baze.neuronauka.dao.IzvodjenjeDAO;
+import org.baze.neuronauka.dao.ResursiDAO;
 import org.baze.neuronauka.dao.SesijaDAO;
+import org.baze.neuronauka.model.AlatDetaljiDTO;
+import org.baze.neuronauka.model.AlatGrupaDTO;
+import org.baze.neuronauka.model.LaboratorijaDTO;
 import org.baze.neuronauka.model.SesijaDTO;
-import org.baze.neuronauka.view.LaboratorijaView;
-import org.baze.neuronauka.view.SesijaIzmenaView;
-import org.baze.neuronauka.view.SesijaView;
+import org.baze.neuronauka.view.*;
+import javafx.scene.layout.VBox;
+import org.baze.neuronauka.view.DodajAlatView;
+import org.baze.neuronauka.view.IzvodjenjeContent;
+
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -18,20 +25,32 @@ public class SesijaController {
 
     private final SesijaView view;
     private final SesijaDAO  dao = new SesijaDAO();
-    private String loggedInUser = "";
+    private String loggedInUser  = "";
+    private Stage  stage;
 
-    // ─────────────────────────────────────────────────────────────
+    // ── čuvamo ResursiContent da controller ne gubi state ──────────
+    private ResursiContent    resursiContent;
+    private ResursiController resursiController;
+
+    private EksperimentContent    eksperimentContent;
+    private EksperimentController eksperimentController;
+
     public SesijaController(SesijaView view, String loggedInUser) {
-        this.view          = view;
-        this.loggedInUser  = loggedInUser;
+        this.view         = view;
+        this.loggedInUser = loggedInUser;
         ucitajDropdownove();
         initActions();
         osvežiKalendar();
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // INICIJALIZACIJA
-    // ─────────────────────────────────────────────────────────────
+    public void reinitNavActions() {
+        if (stage == null && view.getPrevMonthBtn().getScene() != null) {
+            stage = (Stage) view.getPrevMonthBtn().getScene().getWindow();
+        }
+        initActions();
+        osvežiKalendar();
+    }
+    // ── INICIJALIZACIJA ────────────────────────────────────────────
 
     private void ucitajDropdownove() {
         String odabranaLab = view.getLabFilter().getValue();
@@ -52,60 +71,196 @@ public class SesijaController {
         else
             view.getExpFilter().getSelectionModel().selectFirst();
     }
-    private void otvoriUpravljanjeLaboratorijama() {
-        LaboratorijaView labView = new LaboratorijaView();
-        new org.baze.neuronauka.controller.LaboratorijaController(
-                labView,
-                this::ucitajDropdownove
-        );
-        Stage parentStage = (Stage) view.getPrevMonthBtn().getScene().getWindow();
-        labView.show(parentStage, loggedInUser);   // ← prosleđuje korisnika
-    }
 
     private void initActions() {
+
+        // ── Sesija menu ────────────────────────────────────────────
+        view.getPregledSesijaItem().setOnAction(e -> prikaziSesije());
+        view.getNovaSesijaItem().setOnAction(e    -> otvoriNovuSesiju());
+
+        // ── Navigacija kalendarom ──────────────────────────────────
         view.getPrevMonthBtn().setOnAction(e -> {
             view.setCurrentYearMonth(view.getCurrentYearMonth().minusMonths(1));
             osvežiKalendar();
         });
-
         view.getNextMonthBtn().setOnAction(e -> {
             view.setCurrentYearMonth(view.getCurrentYearMonth().plusMonths(1));
             osvežiKalendar();
         });
-
         view.getYearSpinner().valueProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal == null) return;
-            YearMonth novi = YearMonth.of(newVal, view.getCurrentYearMonth().getMonth());
-            view.setCurrentYearMonth(novi);
+            view.setCurrentYearMonth(YearMonth.of(newVal, view.getCurrentYearMonth().getMonth()));
             osvežiKalendar();
         });
 
-        // svaka promena filtera ide ponovo u bazu
+        // ── Sidebar filteri ────────────────────────────────────────
         view.getLabFilter().setOnAction(e -> osvežiKalendar());
         view.getExpFilter().setOnAction(e -> osvežiKalendar());
-        view.getEditLabBtn().setOnAction(e -> otvoriUpravljanjeLaboratorijama());
+
+        // ── Laboratorija menu ──────────────────────────────────────
+        view.getEditLabItem().setOnAction(e   -> otvoriUpravljanjeLaboratorijama());
+        view.getResuriLabItem().setOnAction(e -> prikaziResurse());
+        view.getAlatLabItem().setOnAction(e -> prikaziAlat());
+
+        // ── Eksperiment menu ───────────────────────────────────────
+        // ── Eksperiment menu ───────────────────────────────────────────
+        view.getEditExpItem().setOnAction(e -> otvoriUpravljanjeEksperimentima());
+        view.getStatsExpItem().setOnAction(e -> {
+            StatistikaContent sc = new StatistikaContent();
+            new StatistikaController(sc);
+            view.switchCenter(sc.build());
+        });
+
+        view.getIzvodjenjeExpItem().setOnAction(e -> {
+            if (stage == null) {
+                stage = (Stage) view.getSesijaMenuBtn().getScene().getWindow();
+            }
+            IzvodjenjeContent ic = new IzvodjenjeContent();
+            new IzvodjenjeController(ic, stage);
+            view.switchCenter(ic.build());
+        });
+    }
+
+    // ── NAVIGACIJA IZMEĐU PRIKAZA ──────────────────────────────────
+
+    private void prikaziSesije() {
+        view.setActiveView("sesije");
+        view.switchCenter(view.buildSesijaCenter());
+        initActions();
+        osvežiKalendar();
+    }
+
+    private void prikaziResurse() {
+        if (resursiContent == null) {
+            resursiContent    = new ResursiContent();
+            resursiController = new ResursiController(
+                    resursiContent,
+                    loggedInUser,
+                    this::prikaziSesije
+            );
+        } else {
+            // osvezi laboratorije svaki put kada se otvori ekran
+            resursiController.osveziLaboratorije();
+        }
+        Node resursiNode = resursiContent.build();
+        view.setActiveView("resursi");
+        view.switchCenter(resursiNode);
+    }
+    private AlatContent  alatContent;
+
+    private void prikaziAlat() {
+        if (alatContent == null) {
+            alatContent = new AlatContent();
+            initAlatActions();
+        }
+        ResursiDAO resursiDAO = new ResursiDAO();
+        alatContent.setLaboratorije(resursiDAO.getSveLaboratorije());
+        view.setActiveView("alat");
+        view.switchCenter(alatContent.build());
+    }
+
+    private void initAlatActions() {
+        ResursiDAO resursiDAO = new ResursiDAO();
+
+        // Bira se laboratorija → puni levu tabelu
+        alatContent.getLabCombo().setOnAction(e -> {
+            LaboratorijaDTO lab = alatContent.getLabCombo().getValue();
+            if (lab == null) {
+                alatContent.resetPrikaz();
+                return;
+            }
+            try {
+                List<AlatGrupaDTO> grupe =
+                        resursiDAO.getAlatPoLaboratoriji(lab.getIdLaboratorija());
+                alatContent.prikaziGrupe(grupe);
+            } catch (Exception ex) {
+                // tiha greška — možeš dodati Alert ako želiš
+            }
+        });
+
+        // Klikne se tip alata → puni desnu listu
+        alatContent.setOnGrupaSelected(grupa -> {
+            LaboratorijaDTO lab = alatContent.getLabCombo().getValue();
+            if (lab == null) return;
+            try {
+                List<AlatDetaljiDTO> detalji =
+                        resursiDAO.getDetaljiAlata(
+                                grupa.getIdTipAlata(),
+                                lab.getIdLaboratorija());
+                alatContent.prikaziDetalje(detalji);
+            } catch (Exception ex) {
+                // tiha greška
+            }
+        });
+
+        // Toggle na konkretnom alatu → UPDATE u bazi
+        alatContent.setOnToggleDetalj(detalj -> {
+            try {
+                resursiDAO.promeniStatusAlata(detalj.getIdAlat(), detalj.isAktivan());
+                alatContent.osvežiDetalj(detalj);
+            } catch (Exception ex) {
+                // vrati u prethodno stanje
+                detalj.setStatusAlata(detalj.isAktivan() ? "na servisu" : "aktivan");
+                alatContent.osvežiDetalj(detalj);
+            }
+        });
+        alatContent.setOnDodajAlat(() -> {
+            LaboratorijaDTO lab = alatContent.getOdabranaLaboratorija();
+            ResursiDAO reDAO = new ResursiDAO();
+            DodajAlatView dodajView = new DodajAlatView(lab.getNaziv());
+            new DodajAlatController(dodajView, reDAO, lab, () -> {
+                try {
+                    alatContent.prikaziGrupe(
+                            reDAO.getAlatPoLaboratoriji(lab.getIdLaboratorija()));
+                } catch (Exception ex) {
+                    // tiha greška
+                }
+            });
+            dodajView.show(stage);
+        });
+
 
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // GLAVNI REFRESH — poziva DAO, pa renderuje
-    // ─────────────────────────────────────────────────────────────
+
+
+    // ── OTVARANJE PROZORA ──────────────────────────────────────────
+
+    private void otvoriNovuSesiju() {
+        IzvodjenjeDAO  izvDao   = new IzvodjenjeDAO();
+        NovaSesijaView novaView = new NovaSesijaView();
+        new NovaSesijaController(novaView, this::osvežiKalendar);
+        novaView.show(stage, izvDao.getAktivnaIzvodjenja());
+    }
+
+    private void otvoriUpravljanjeLaboratorijama() {
+        LaboratorijaView labView = new LaboratorijaView();
+        new LaboratorijaController(labView, this::ucitajDropdownove);
+        labView.show(stage, loggedInUser);
+    }
+
+    private void otvoriUpravljanjeEksperimentima() {
+        if (eksperimentContent == null) {
+            eksperimentContent    = new EksperimentContent();
+            eksperimentController = new EksperimentController(
+                    eksperimentContent, stage, loggedInUser);
+        }
+        view.switchCenter(eksperimentContent.build());
+    }
+
+    // ── GLAVNI REFRESH ─────────────────────────────────────────────
 
     private void osvežiKalendar() {
         String odabranaLab = view.getLabFilter().getValue();
         String odabraniExp = view.getExpFilter().getValue();
 
-        // Ako je odabrano "sve" (null vrednost), šaljemo null → SQL ignoriše filter
         List<SesijaDTO> sesije = dao.getSesijeFiltered(odabranaLab, odabraniExp);
 
-        // Ako još nije postavljen mesec, skači na poslednji mesec koji ima sesije
         if (!sesije.isEmpty()) {
             YearMonth trenutni = view.getCurrentYearMonth();
             boolean imaUTrenutnom = sesije.stream()
                     .anyMatch(s -> YearMonth.from(s.getDatumSesije()).equals(trenutni));
-
             if (!imaUTrenutnom) {
-                // skači na poslednji mesec sa sesijama
                 sesije.stream()
                         .map(s -> YearMonth.from(s.getDatumSesije()))
                         .max(Comparator.naturalOrder())
@@ -117,46 +272,35 @@ public class SesijaController {
         renderSidebar(sesije);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // RENDERING KALENDARA
-    // ─────────────────────────────────────────────────────────────
+    // ── RENDERING KALENDARA ────────────────────────────────────────
 
     private void renderKalendar(List<SesijaDTO> sveSesjeSaFiltera) {
         view.clearCalendarGrid();
 
-        YearMonth ym       = view.getCurrentYearMonth();
-        LocalDate danas    = LocalDate.now();
-        int ukupnoDana     = ym.lengthOfMonth();
-        // koliko praznih ćelija pre prvog (0=Pon, 6=Ned)
-        int offset         = ym.atDay(1).getDayOfWeek().getValue() - 1;
+        YearMonth ym    = view.getCurrentYearMonth();
+        LocalDate danas = LocalDate.now();
+        int ukupnoDana  = ym.lengthOfMonth();
+        int offset      = ym.atDay(1).getDayOfWeek().getValue() - 1;
 
-        // samo sesije koje padaju u ovaj mesec
         List<SesijaDTO> ovogMeseca = sveSesjeSaFiltera.stream()
                 .filter(s -> YearMonth.from(s.getDatumSesije()).equals(ym))
                 .collect(Collectors.toList());
 
-        // prazne ćelije pre prvog dana
-        for (int i = 0; i < offset; i++) {
+        for (int i = 0; i < offset; i++)
             view.addCellToGrid(view.makeEmptyCell(), i, 0);
-        }
 
-        int col = offset;
-        int row = 0;
-
+        int col = offset, row = 0;
         for (int dan = 1; dan <= ukupnoDana; dan++) {
             LocalDate datum = ym.atDay(dan);
             boolean jeToday = datum.equals(danas);
+            VBox cell       = view.makeDayCell(dan, jeToday);
 
-            VBox cell = view.makeDayCell(dan, jeToday);
-
-            // sesije za ovaj konkretan dan, sortirane po vremenu
             ovogMeseca.stream()
                     .filter(s -> s.getDatumSesije().equals(datum))
                     .sorted(Comparator.comparing(SesijaDTO::getVremePocetka))
                     .forEach(s -> {
                         int trajMin = (int) Duration.between(
                                 s.getVremePocetka(), s.getVremeKraja()).toMinutes();
-
                         VBox chip = view.makeSesijaChip(
                                 s.getIdSesija(),
                                 s.getVremePocetka().toString(),
@@ -164,9 +308,7 @@ public class SesijaController {
                                 s.getEksperiment(),
                                 s.getTipSesije()
                         );
-
                         chip.setOnMouseClicked(e -> otvoriIzmenu(s));
-
                         cell.getChildren().add(chip);
                     });
 
@@ -176,18 +318,12 @@ public class SesijaController {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // RENDERING SIDEBARA
-    // Prikazuje eksperimente ovog meseca, a u zagradi ID-jevi sesija
-    // Primer: "EXP-001 Reakcija na stimul  (sesije: 14, 19)"
-    // ─────────────────────────────────────────────────────────────
+    // ── RENDERING SIDEBARA ─────────────────────────────────────────
 
     private void renderSidebar(List<SesijaDTO> sveSesjeSaFiltera) {
         view.getSesijaListView().getItems().clear();
-
         YearMonth ym = view.getCurrentYearMonth();
 
-        // filtriraj samo ovaj mesec
         List<SesijaDTO> ovogMeseca = sveSesjeSaFiltera.stream()
                 .filter(s -> YearMonth.from(s.getDatumSesije()).equals(ym))
                 .collect(Collectors.toList());
@@ -197,33 +333,27 @@ public class SesijaController {
             return;
         }
 
-        // Grupiši po nazivu eksperimenta — cela logika grupisanja u Javi
-        // (GROUP BY je već u SQL-u za agregirane upite; ovde je UI grupisanje za prikaz)
         ovogMeseca.stream()
                 .map(SesijaDTO::getEksperiment)
                 .distinct()
                 .sorted()
                 .forEach(eksperiment -> {
-                    // svi ID-jevi sesija vezani za ovaj eksperiment ovog meseca
                     String idSesija = ovogMeseca.stream()
                             .filter(s -> eksperiment.equals(s.getEksperiment()))
                             .sorted(Comparator.comparing(SesijaDTO::getDatumSesije)
                                     .thenComparing(SesijaDTO::getVremePocetka))
                             .map(s -> String.valueOf(s.getIdSesija()))
                             .collect(Collectors.joining(", "));
-
                     view.getSesijaListView().getItems()
                             .add(eksperiment + "  (sesije: " + idSesija + ")");
                 });
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // OTVARANJE FORME ZA IZMENU — popuni polja iz DTO-a, pa prikaži
-    // ─────────────────────────────────────────────────────────────
+    // ── IZMENA SESIJE ──────────────────────────────────────────────
+
+
     private void otvoriIzmenu(SesijaDTO s) {
         SesijaIzmenaView izmenaView = new SesijaIzmenaView();
-
-        // popuni polja pre nego što se prozor prikaže
         izmenaView.getIdLabel().setText("ID sesije: " + s.getIdSesija());
         izmenaView.getEksperimentLabel().setText(s.getEksperiment());
         izmenaView.getLaboratorijaLabel().setText(s.getLaboratorija());
@@ -233,12 +363,7 @@ public class SesijaController {
         izmenaView.getKrajHH().getValueFactory().setValue(s.getVremeKraja().getHour());
         izmenaView.getKrajMM().getValueFactory().setValue(s.getVremeKraja().getMinute());
         izmenaView.getTipSesijeBox().setValue(s.getTipSesije());
-
-        // controller mora da postoji PRE show() jer show() crta dugmad
-        // a controller vezuje saveBtn akciju
         new SesijaIzmenaController(izmenaView, s, this::osvežiKalendar);
-
-        Stage parentStage = (Stage) view.getPrevMonthBtn().getScene().getWindow();
-        izmenaView.show(parentStage);
+        izmenaView.show(stage);
     }
 }

@@ -9,6 +9,11 @@ public class LaboratorijaDTO {
 
     public LaboratorijaDTO() {}
 
+    public LaboratorijaDTO(int idLaboratorija, String naziv) {
+        this.idLaboratorija = idLaboratorija;
+        this.naziv = naziv;
+    }
+
     public LaboratorijaDTO(int idLaboratorija, String naziv,
                            String tipLaboratorije, String opisLokacije) {
         this.idLaboratorija  = idLaboratorija;
