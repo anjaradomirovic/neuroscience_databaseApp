@@ -4,7 +4,7 @@ A desktop application for managing the daily work of a neuroscience research fac
 
 > The user interface is in Serbian.
 
-![Sessions calendar view](screenshots/sessions.png)
+![Sessions calendar view](screen.png)
 *Sessions calendar with filtering by laboratory and experiment.*
 
 ## Features
